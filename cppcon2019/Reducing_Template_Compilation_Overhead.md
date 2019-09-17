@@ -446,7 +446,7 @@ template: basic-layout
 
 Just this one line:
 ```cpp
-get&lt;4>(tup) = 1.0;
+get<4>(tup) = 1.0;
 ```
 Calls:
 <pre style='font-size:20px'>
@@ -568,7 +568,7 @@ Calls:
  auto& get&lt;4ul, bool, char, short, int, double>(MyTuple&lt;bool, char, short, int, double>&);
 
  // Which calls:
- MyTuple&lt;int, double>::get(std::integral_constant&lt;unsigned long, 1ul>)
+ MyTuple&lt;double>::get(std::integral_constant&lt;unsigned long, 0ul>)
 </pre>
 
 
@@ -576,12 +576,45 @@ Calls:
 name: custom tuple
 template: basic-layout
 
-Still O(N^2) to instantiate MyTuple however.  MyTuple<A, B, C> inherits from
-MyTuple<B, C> which inherits from MyTuple<C>.
+Still O(N^2) to instantiate MyTuple however.  MyTuple&lt;A, B, C> inherits from
+MyTuple&lt;B, C> which inherits from MyTuple&lt;C>.
+
+Solution: inherit from MyTupleElem&lt;A> and MyTupleElem&lt;B> and MyTupleElem&lt;C> etc.
 
 ```cpp
-MyTuple : MyTuple
+template <typename T> struct MyTupleLeaf {
+  T _value;
+};
+
+template<typename... T> class MyTuple : MyTupleLeaf<T...> {
+public:
+ auto& get() {  /* ?? */ }
+};
 ```
+
+???
+
+But how does get() work?  And doesn't this have problems if a T is mentioned
+twice?
+
+---
+name: custom tuple
+template: basic-layout
+
+So let's bind a selector value into the types we derive from...
+
+```cpp
+template <std::size_t I, typename T>
+struct _tuple_leaf {
+  T _value;
+};
+template<typename... T> class MyTuple : MyTupleLeaf<T...> {
+public:
+ auto& get() {  /* ?? */ }
+};
+```
+
+Reference: http://talesofcpp.fusionfenix.com/post-22/true-story-efficient-packing
 
 Older code: https://godbolt.org/z/5RZkb5
 Newest code: https://godbolt.org/z/vgGT2I
