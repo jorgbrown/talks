@@ -515,6 +515,11 @@ template: basic-layout
 2 . Use function overrides to go directly to an inherited function of your choice
 
 ```cpp
+template<typename... T> class MyTuple {
+  // This definition is used for MyTuple<>, the base instance.
+  //
+};
+
 template<typename T, typename... More>
 class MyTuple<T, More...> : MyTuple<More...> {
   T first;
