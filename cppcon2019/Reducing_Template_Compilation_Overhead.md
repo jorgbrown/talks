@@ -516,8 +516,8 @@ template: basic-layout
 
 ```cpp
 template<typename... T> class MyTuple {
-  // This definition is used for MyTuple<>, the base instance.
-  //
+  // This definition is only used for MyTuple<>, the base instance.
+  // Real uses are specialized below.
 };
 
 template<typename T, typename... More>
@@ -581,45 +581,270 @@ Calls:
 name: custom tuple
 template: basic-layout
 
-Still O(N^2) to instantiate MyTuple however.  MyTuple&lt;A, B, C> inherits from
+#### Still O(N^2) to instantiate MyTuple.
+
+MyTuple&lt;A, B, C> inherits from
 MyTuple&lt;B, C> which inherits from MyTuple&lt;C>.
 
-Solution: inherit from MyTupleElem&lt;A> and MyTupleElem&lt;B> and MyTupleElem&lt;C> etc.
+In order to do MyTuple in O(N), we need a way to instantiate each individual type that doesn't involve the others.  So let's try inheriting from Leaf&lt;A> and Leaf&lt;B> and Leaf&lt;C> etc.
+
+???
+Next slide.
+
+---
+name: custom tuple
+template: basic-layout
+
+So let's try inheriting from Leaf&lt;A> and Leaf&lt;B> and Leaf&lt;C> etc.
 
 ```cpp
 template <typename T> struct MyTupleLeaf {
-  T _value;
+  T value_;
+  constexpr MyTupleLeaf(Arg&&... arg) : value_(std::forward<Arg>(arg)...) {}
 };
 
-template<typename... T> class MyTuple : MyTupleLeaf<T...> {
+template<typename... T> class MyTuple : MyTupleLeaf<T>... {
 public:
+  template<typename... Args>
+  explicit constexpr MyTuple(Args&&... args)
+    : MyTupleLeaf<T>(std::forward<Args>(args))... {}
+
+ template<size_t I>
  auto& get() {  /* ?? */ }
 };
+
+MyTuple<char, short, int> tuple{'c', 1, 2};
 ```
 
 ???
 
-But how does get() work?  And doesn't this have problems if a T is mentioned
+Mention the constructor API and the fact that future slides own't have it.
+
+But how does get() work?  More importantly, doesn't this have problems if a T is mentioned
 twice?
 
 ---
 name: custom tuple
 template: basic-layout
 
-So let's bind a selector value into the types we derive from...
+So let's bake a selector value into the types we derive from...
+
+```cpp
+template <`std::size_t I,` typename T>
+struct MyTupleLeaf {
+  T value_;
+};
+
+template<`size_t... Index,` typename... T> class MyTuple : MyTupleLeaf<`Index,` T>... {
+public:
+ template<size_t I>
+ auto& get() {  /* ?? */ }
+};
+
+MyTuple<`0, 1, 2,` char, short, int> tuple;
+```
+
+???
+
+But you can only have one variadic in a template specialization, so we'll need to encapsulate them in a type.
+---
+name: custom tuple
+template: basic-layout
+
+Encapsulate the indices into a type.
 
 ```cpp
 template <std::size_t I, typename T>
-struct _tuple_leaf {
-  T _value;
+struct MyTupleLeaf {
+  T value_;
 };
-template<typename... T> class MyTuple : MyTupleLeaf<T...> {
+
+*template<typename... T> class MyTuple;
+
+template<size_t... Index, typename... T>
+class MyTuple<`std::index_sequence<Index...>,` T...> : MyTupleLeaf<Index, T>... {
 public:
+ template<size_t I>
  auto& get() {  /* ?? */ }
+};
+
+MyTuple<`std::index_sequence<0, 1, 2>,` char, short, int> tuple;
+```
+
+???
+And now we can implement get!
+---
+name: custom tuple
+template: basic-layout
+
+Now, implement get()
+
+```cpp
+template <std::size_t I, typename T>
+struct MyTupleLeaf {
+  T value_;
+* T& get(std::integral_constant<size_t, I>) { return value_; }
+};
+
+template<typename... T> class MyTuple;
+
+template<size_t... Index, typename... T>
+class MyTuple<std::index_sequence<Index...>, T...> : MyTupleLeaf<Index, T>... {
+* using MyTupleLeaf<Index, T>::get...;
+public:
+  template<size_t I>
+* auto& get() { return get(std::integral_constant<size_t, I>{}); }
+};
+
+MyTuple<std::index_sequence<0, 1, 2>, char, short, int> tuple;
+*short& get1 = tuple.get<1>();
+```
+???
+But what if you don't have C++17?  The technique is applicable elsewhere, so...
+
+---
+name: hi there
+template: basic-layout
+
+Make MyTuple generate the index sequence!
+
+```cpp
+template <std::size_t I, typename T>
+struct MyTupleLeaf {
+  T value_;
+  T& get(std::integral_constant<size_t, I>) { return value_; }
+};
+
+template<typename... T> class MyTuple;
+template<size_t... Index, typename... T>
+class MyTuple<std::index_sequence<Index...>, T...> : MyTupleLeaf<Index, T>... {
+  using MyTupleLeaf<Index, T>::get...;
+public:
+  template<size_t I>
+  auto& get() { return get(std::integral_constant<size_t, I>{}); }
+};
+
+*template<typename... T>
+*class MyTuple : MyTuple<std::make_index_sequence<sizeof...(T)>, T...> {
+*};
+*MyTuple<char, short, int> tuple;
+```
+???
+But what if you want a tuple with a first type that is an index sequence?
+
+---
+Make MyTuple a using statement, to separate it from its implementation.
+
+```cpp
+template <std::size_t I, typename T>
+struct MyTupleLeaf {
+  T value_;
+  T& get(std::integral_constant<size_t, I>) { return value_; }
+};
+
+template<typename... T> class MyTuple`Impl`;
+template<size_t... Index, typename... T>
+class MyTuple`Impl`<std::index_sequence<Index...>, T...> : MyTupleLeaf<Index, T>... {
+  using MyTupleLeaf<Index, T>::get...;
+public:
+  template<size_t I>
+  auto& get() { return get(std::integral_constant<size_t, I>{}); }
+};
+
+template<typename... T>
+ `using` MyTuple = MyTuple`Impl`<std::make_index_sequence<sizeof...(T)>, T...>;
+
+MyTuple<char, short, int> tuple;
+```
+
+???
+But what about C++11?
+---
+name: custom tuple in C++11
+template: basic-layout
+
+But before C++17, you can't use variadic using statements.  What about C++11?
+
+```cpp
+template<typename... T> class MyTupleImpl;
+template<size_t... Index, typename... T>
+class MyTupleImpl<std::index_sequence<Index...>, T...> : MyTupleLeaf<Index, T>... {
+* using MyTupleLeaf<Index, T>::get...;
+public:
+  template<size_t I>
+  auto& get() { return get(std::integral_constant<size_t, I>{}); }
 };
 ```
 
+---
+name: custom tuple in C++11
+template: basic-layout
+
+In C++11, we could do it with an extra template parameter...
+
+```cpp
+template<typename... T> class MyTupleImpl;
+template<size_t... Index, typename... T>
+class MyTupleImpl<std::index_sequence<Index...>, T...> : MyTupleLeaf<Index, T>... {
+  using MyTupleLeaf<Index, T>::get...;
+public:
+//template<size_t I>
+//auto& get() { return get(std::integral_constant<size_t, I>{}); }
+  template<size_t I`, typename TType`>
+  auto& get() {
+    `MyTupleLeaf<I, TType> &leaf = *this;`
+    return `leaf.`get(std::integral_constant<size_t, I>{});
+  }
+};
+
+MyTuple<std::index_sequence<0, 1, 2>, char, short, int> tuple;
+//short& get1 = tuple.get<1>();
+short& get1 = tuple.get<1, short>();
+
+```
+
+---
+name: custom tuple in C++11
+template: basic-layout
+
+Better yet, if we pass the tuple as a parameter, we can deduce the type:
+
+```cpp
+template<typename... T> class MyTupleImpl;
+template<size_t... Index, typename... T>
+class MyTupleImpl<std::index_sequence<Index...>, T...> : MyTupleLeaf<Index, T>... {
+  using MyTupleLeaf<Index, T>::get...;
+public:
+//template<size_t I>
+//auto& get() { return get(std::integral_constant<size_t, I>{}); }
+* template<size_t I, typename TType>
+* auto& get_leaf(MyTupleLeaf<I, TType> *leaf) { return *leaf; }
+  template<size_t I>
+  auto& get() {
+*   auto &leaf = get_leaf<I>(this);
+    return leaf.get(std::integral_constant<size_t, I>{});
+  }
+};
+
+MyTuple<std::index_sequence<0, 1, 2>, char, short, int> tuple;
+short& get1 = tuple.get<1>();
+
+```
+
+---
+name: custom tuple
+template: basic-layout
+
+LAST SLIDE
+LAST SLIDE
+LAST SLIDE
+LAST SLIDE
+LAST SLIDE
+
+
 Reference: http://talesofcpp.fusionfenix.com/post-22/true-story-efficient-packing
+
+Reference2: https://ldionne.com/2015/11/29/efficient-parameter-pack-indexing/
 
 Older code: https://godbolt.org/z/5RZkb5
 Newest code: https://godbolt.org/z/vgGT2I
