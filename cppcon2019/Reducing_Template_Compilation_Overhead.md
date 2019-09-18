@@ -17,10 +17,16 @@ template: title-layout
 ???
 Intro:
 - I'm Jorg Brown
-- I work with Chandler Carruth on Google's C++ PL platform
+- I work with Chandler Carruth on Google's C++ PL platform, specializing in RISC-V
 - Obsessed with performance and optimization.
 
-I've wanted to have given a talk at CppCon for some time, and finally have one.
+I've wanted to have given a talk at CppCon for some time, and finally have something worthy of talking about.
+
+There's a recurring theme at work: template compilation overhead.
+
+Sometimes, it's a case of a team wondering why their builds are so slow.
+
+A few months ago, we switched from libstdc++ to libc++, and while mostly an improvement, a handful of builds didn't work anymore.
 
 ---
 name: Background
@@ -29,6 +35,7 @@ class: middle, center
 ![First Guess](templates_memory_bender_meme.jpg)
 
 ???
+When I see the compiler running out of RAM, I can just blame templates without even looking.  Not much else can so easily run a compiler into the ground.  But before I do that, let me go voer some background.
 
 ---
 name: Background
@@ -36,14 +43,16 @@ class: left, middle
 
 # Reducing Template Overhead
 ## First, some background
-1. Hard to measure when things are going well
 1. BubbleSort is better than you think.
+1. Hard to measure when things are going well
 1. Compile-time calculation can be surprising
 
 ???
-Well-designed O(n) template code is in the noise, as far as overhead goes.
-So is O(n^2) overhead, typically.
 BubbleSort isn't just OK for low N; it's OPTIMAL up to N=3.
+
+Even fairly bad template code does fine in small situations.
+
+On the flip side, template code can be far worse than BubbleSort.
 
 ---
 ### It's hard to measure template overhead...
@@ -55,6 +64,10 @@ BubbleSort isn't just OK for low N; it's OPTIMAL up to N=3.
      Compiler Explorer.
    * Dump all types: compile with "-g", then "dwarfdump -debug-types
      -debug-pubtypes -debug-gnu-pubtypes foo.o"
+
+???
+Well-designed O(n) template code is in the noise, as far as overhead goes.
+So is O(n^2) overhead, typically.
 
 ---
 ### Compile-time basics: functions
@@ -88,6 +101,9 @@ int main() {
 }
 ```
 
+???
+Marking the function constexpr doesn't mean that it gets executed at compile-time; just that ir could.  You have to evaluate it in a constexpr context to force it to be evaluated at compile-time.
+
 ---
 ### Compile-time basics: functions
 
@@ -102,6 +118,9 @@ int main() {
   return fib;
 }
 ```
+
+???
+OK Great, now it's in a compile-time context.  But let's up that from 16 to 27...
 
 ---
 ### Compile-time basics: functions
@@ -119,6 +138,10 @@ int main() {
   return fib;
 }
 ```
+
+So what happened?  Well, the compiler evaluated it, but constexpr functions aren't necessarily memo-ized.
+
+How do we fix this?  Well, let's do a template instead.
 
 ---
 ### Compile-time basics: templates
@@ -160,8 +183,7 @@ int main() {
 ```
 
 ???
-Note: Specializations for <0> and <1> were necessary, because lazy evluation for
-? : doesn't block template instantiation.
+OK, but that's a bit ugly, and tedious.  It's weird to have the loop termination occur outside of the function. C++17 allows us to make this clearer; anything within a false "if constexpr" block won't be examined by the compiler, other than basic syntactic regularity like balanced parens.
 
 ---
 ### Compile-time basics: templates
@@ -184,8 +206,7 @@ int main() {
 ```
 
 ???
-Note: Specializations for <0> and <1> were necessary, because lazy evluation for
-? : doesn't block template instantiation.
+But is there maybe a way to make a function be evaluated at compile-time?
 
 ---
 #### This one weird trick...
@@ -213,13 +234,15 @@ to do the calculation at compile-time, even in debug mode.
 By making the return value part of the returned type, we make it possible to
 avoid calling the routine at all.
 
-The function's signature gets smaller because we're returning auto without the
-"->"
+Speaking of auto return types, they have an extra benefit, and it has to do with
+function signatures.
 
 ---
 ## The overhead of function signatures
 
 ```cpp
+// Can you guess what the non-mangled signatures of these 3 functions are?
+
 std::string add1(std::string a, std::string b);
 
 
@@ -237,6 +260,8 @@ auto add3(T a, T b) { return a + b; }
 ## The overhead of function signatures
 
 ```cpp
+// Did you guess what the non-mangled signatures of these 3 functions were?
+
 std::string add1(std::string a, std::string b);
 
 *add1(std::string, std::string)
@@ -252,6 +277,11 @@ auto add3(T a, T b) { return a + b; }
 *auto add3<std::string>(std::string, std::string)
 ```
 
+???
+The first case is clear.
+
+The second case is not so clear.  It turns out that the function's return type is included in its signature whenever the return type depends on a template parameter.  The reasons for this are a bit arcane; the obvious reason would be that sometimes you might want to have a function generate a string, and you want to template its return type.
+
 ---
 ## The overhead of function signatures
 
@@ -265,7 +295,10 @@ template<typename T>
 typename std::enable_if_t<!std::is_same<T, void>::value, T>
 process(T a);
 
+*What's your guess?
+
 ```
+Give them a little while to think about it...
 
 ---
 ## The overhead of function signatures
@@ -284,6 +317,14 @@ process(T a);
 *            process<std::string>(std::string)
 
 ```
+??? That's right, it's not the return type that gets encoded, it's the way the
+return type was determined.
+
+The moral of the story is: prefer to use an auto return type unless the enable_if
+is being used to remove a funtion overload from consideration.
+
+In particular, if you're just trying to prevent a routine from being called, it's
+far more clear to provide a static_assert.  (Next slide)
 
 ---
 ## The overhead of function signatures
@@ -313,8 +354,8 @@ template: basic-layout
 
 1. 'inline' functions aren't necessarily inlined.
    * 'inline' is only guaranteed to affect linkage.
-2. 'constexpr' functions are usually not memo-ized, and not necessarily inlined,
-   even if they always produce the same result.
+2. 'constexpr' functions are not necessarily suitable for constexpr use, not necessarily inlined,
+   even if they always produce the same result, and usually not memo-ized.
    * 'constexpr' only guarantees that the result can be used in situations where
      only a constant is allowed.
 3. 'template' instantiations are guaranteed to be memo-ized
@@ -333,6 +374,9 @@ template: basic-layout
 ```cpp
 template<typename... T> class MyTuple;
 ```
+
+???
+Seems easy enough, right?  Examining the code of a simple tuple implementation taught me a lot about how bad template code happens.  Let's examine a naive implementation.
 
 ---
 name: custom tuple
@@ -357,6 +401,10 @@ class MyTuple<T, More...> {
   template<size_t N, typename TN> friend struct Getter;
 };
 ```
+
+???
+Note that the first case stops the recursion, and the second case instantiates another MyTuple instance as a member var.  The actual implementatio of Get is done inside the Getter routine... which together are too long to fit on one slide.
+
 ---
 name: custom tuple
 template: basic-layout
@@ -384,6 +432,14 @@ auto get(MyTuple<Ts...> &tup)
 ```
 
 ???
+This helper class, Getter, is templated on the index of the value it should retrieve, and the type of that value.
+
+Explain the general case, and then the specialilzation, within Getter.
+
+Then show the implementation of get() which has to use std::tuple_element to figure out the return value.
+
+So... O(N)?  O(N^2)?  Worse.
+
 GodBolt: https://godbolt.org/z/75Qe2Z
 
 ---
@@ -440,6 +496,11 @@ double& Getter&lt;1ul, double>::get&lt;int, double>(MyTuple&lt;int, double>&)
 double& Getter&lt;0ul, double>::get&lt;double>(MyTuple<double>&)
 </pre>
 
+???
+These are the function signatures that were generated.
+
+O(N^2) functions generated, each with O(N) signature size.
+
 ---
 name: custom tuple
 template: basic-layout
@@ -460,6 +521,8 @@ Calls:
  double& Getter&lt;1ul, double>::get&lt;int, double>(MyTuple&lt;int, double>&)
  double& Getter&lt;0ul, double>::get&lt;double>(MyTuple<double>&)
 </pre>
+
+Explain why that is, then ask, well, what can we do to make this better?
 
 ---
 name: custom tuple
@@ -488,6 +551,11 @@ Becomes:
  auto& get&lt;4ul, bool, char, short, int, double>(MyTuple&lt;bool, char, short, int, double>&);
 </pre>
 
+???
+Also, by using an auto return type, we don't need the type parameter for Getter.
+
+So did it fix the problem?
+
 ---
 name: custom tuple
 template: basic-layout
@@ -507,6 +575,11 @@ Calls:
  auto& Getter&lt;1ul>::get&lt;int, double>(MyTuple&lt;int, double>&)
  auto& Getter&lt;0ul>::get&lt;double>(MyTuple<double>&)
 </pre>
+
+???
+This is better but still O(N^2).  If only there were a way to avoid the intermediate get<>() calls...
+
+Remember that one weird trick?
 
 ---
 name: custom tuple
@@ -535,6 +608,10 @@ auto& get(MyTuple<Ts...> &tup) {
 }
 ```
 
+Rather than instantiate the rest of the tuple, we'll inherit from it.  That way we can access the other member functions directly.
+
+This doesn't quite compile, though...
+
 ---
 name: custom tuple
 template: basic-layout
@@ -562,6 +639,10 @@ auto& get(MyTuple<Ts...> &tup) {
 }
 ```
 
+???
+
+So, does this work?
+
 ---
 
 And now...
@@ -576,6 +657,8 @@ Calls:
  MyTuple&lt;double>::get(std::integral_constant&lt;unsigned long, 0ul>)
 </pre>
 
+???
+So this solves the N^3 problem, right?
 
 ---
 name: custom tuple
@@ -600,6 +683,7 @@ So let's try inheriting from Leaf&lt;A> and Leaf&lt;B> and Leaf&lt;C> etc.
 ```cpp
 template <typename T> struct MyTupleLeaf {
   T value_;
+  template<typename... Arg>
   constexpr MyTupleLeaf(Arg&&... arg) : value_(std::forward<Arg>(arg)...) {}
 };
 
@@ -672,7 +756,7 @@ MyTuple<`std::index_sequence<0, 1, 2>,` char, short, int> tuple;
 ```
 
 ???
-And now we can implement get!
+And now we can implement get!  Remember std::integral_constant, the one weird trick?
 ---
 name: custom tuple
 template: basic-layout
@@ -715,7 +799,9 @@ struct MyTupleLeaf {
   T& get(std::integral_constant<size_t, I>) { return value_; }
 };
 
-template<typename... T> class MyTuple;
+*template<typename... T>
+*class MyTuple : MyTuple<std::make_index_sequence<sizeof...(T)>, T...> {
+*};
 template<size_t... Index, typename... T>
 class MyTuple<std::index_sequence<Index...>, T...> : MyTupleLeaf<Index, T>... {
   using MyTupleLeaf<Index, T>::get...;
@@ -724,9 +810,6 @@ public:
   auto& get() { return get(std::integral_constant<size_t, I>{}); }
 };
 
-*template<typename... T>
-*class MyTuple : MyTuple<std::make_index_sequence<sizeof...(T)>, T...> {
-*};
 *MyTuple<char, short, int> tuple;
 ```
 ???
@@ -763,7 +846,7 @@ But what about C++11?
 name: custom tuple in C++11
 template: basic-layout
 
-But before C++17, you can't use variadic using statements.  What about C++11?
+But before C++17, you can't use variadic using statements.  What about C++14?
 
 ```cpp
 template<typename... T> class MyTupleImpl;
@@ -780,13 +863,13 @@ public:
 name: custom tuple in C++11
 template: basic-layout
 
-In C++11, we could do it with an extra template parameter...
+In C++14, we could do it with an extra template parameter...
 
 ```cpp
 template<typename... T> class MyTupleImpl;
 template<size_t... Index, typename... T>
 class MyTupleImpl<std::index_sequence<Index...>, T...> : MyTupleLeaf<Index, T>... {
-  using MyTupleLeaf<Index, T>::get...;
+//using MyTupleLeaf<Index, T>::get...;
 public:
 //template<size_t I>
 //auto& get() { return get(std::integral_constant<size_t, I>{}); }
@@ -797,14 +880,17 @@ public:
   }
 };
 
-MyTuple<std::index_sequence<0, 1, 2>, char, short, int> tuple;
+MyTuple<char, short, int> tuple;
 //short& get1 = tuple.get<1>();
-short& get1 = tuple.get<1, short>();
-
+short& get1 = tuple.get<1`, short`>();
 ```
 
+???
+But no one wants an extra template parameter for get.  Can we somehow deduce it?
+
+When you pass an argument to a function, the compiler can deduce its type.  It can even deduce specific parts of the type.  For example:
 ---
-name: custom tuple in C++11
+name: custom tuple in C++14
 template: basic-layout
 
 Better yet, if we pass the tuple as a parameter, we can deduce the type:
@@ -813,7 +899,7 @@ Better yet, if we pass the tuple as a parameter, we can deduce the type:
 template<typename... T> class MyTupleImpl;
 template<size_t... Index, typename... T>
 class MyTupleImpl<std::index_sequence<Index...>, T...> : MyTupleLeaf<Index, T>... {
-  using MyTupleLeaf<Index, T>::get...;
+//using MyTupleLeaf<Index, T>::get...;
 public:
 //template<size_t I>
 //auto& get() { return get(std::integral_constant<size_t, I>{}); }
@@ -826,10 +912,67 @@ public:
   }
 };
 
-MyTuple<std::index_sequence<0, 1, 2>, char, short, int> tuple;
+MyTuple<char, short, int> tuple;
 short& get1 = tuple.get<1>();
-
 ```
+
+???
+Of course, no reason to call the get<> function anymore.
+---
+name: custom tuple in C++14
+template: basic-layout
+
+At this point, we don't need the get<> function in MyTupleLeaf.
+
+```cpp
+template <std::size_t I, typename T> struct MyTupleLeaf { T value_; };
+
+template<typename... T> class MyTupleImpl;
+template<size_t... Index, typename... T>
+class MyTupleImpl<std::index_sequence<Index...>, T...> : MyTupleLeaf<Index, T>... {
+public:
+  template<size_t I, typename TType>
+  auto& get_leaf(MyTupleLeaf<I, TType> *leaf) { return *leaf; }
+  template<size_t I>
+  auto& get() {
+*   return get_leaf<I>(this).value_;
+  }
+};
+
+MyTuple<char, short, int> tuple;
+short& get1 = tuple.get<1>();
+```
+
+???
+But what about C++11?  What if we can't deduce the function return type?
+---
+name: custom tuple in C++11
+template: basic-layout
+
+In C++11, we can't deduce return types, so let's fix that, too...
+
+```cpp
+template <std::size_t I, typename T> struct MyTupleLeaf { T value_; };
+
+template<typename... T> class MyTupleImpl;
+template<size_t... Index, typename... T>
+class MyTupleImpl<std::index_sequence<Index...>, T...> : MyTupleLeaf<Index, T>... {
+public:
+  template<size_t I, typename TType>
+  `MyTupleLeaf<I, TType>`& get_leaf(MyTupleLeaf<I, TType> *leaf) { return *leaf; }
+
+  template<size_t I>
+  auto get() `-> decltype(get_leaf<I>(this).value_)&` {
+    return get_leaf<I>(this).value_;
+  }
+};
+
+MyTuple<char, short, int> tuple;
+short& get1 = tuple.get<1>();
+```
+C++11 has no make_index_sequence; Abseil (among others) does.
+
+???
 
 ---
 name: custom tuple
