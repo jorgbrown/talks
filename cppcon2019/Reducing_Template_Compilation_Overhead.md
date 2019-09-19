@@ -973,6 +973,324 @@ short& get1 = tuple.get<1>();
 C++11 has no make_index_sequence; Abseil (among others) does.
 
 ???
+Now let's move on to case study #2.
+
+These arose when I was looking at the "-g" output from clang, which was causing some builds to fail after switching from libc++ to libstdc++.
+
+---
+name: std library is_same
+template: basic-layout
+
+## Case study #2: libc++ and its debug symbols
+
+Consider std::is_same:
+
+```cpp
+template<class T, class U>
+struct is_same : std::false_type {};
+
+template<class T>
+struct is_same<T, T> : std::true_type {};
+```
+
+Do you see why this was a huge burden on debug symbols?
+
+???
+Pause to give people time to think...
+
+---
+name: std library is_same
+template: basic-layout
+
+### Case study #2: libc++ and its debug symbols
+
+Consider debug symbols derived from std::is_same:
+
+```cpp
+std::is_same<char, char>    std::is_same<float, char>
+std::is_same<char, int>     std::is_same<float, int>
+std::is_same<char, float>   std::is_same<float, float>
+std::is_same<char, double>  std::is_same<float, double>
+std::is_same<int, char>     std::is_same<double, char>
+std::is_same<int, int>      std::is_same<double, int>
+std::is_same<int, float>    std::is_same<double, float>
+std::is_same<int, double>   std::is_same<double, double>
+
+... and on and on.  literally N^2 classes instantiated.
+```
+
+???
+Pause to give people time to think...
+
+---
+name: std library is_same
+template: basic-layout
+
+### Case study #2: libc++ and its debug symbols
+
+Better (in some ways) would be:
+```cpp
+template<typename T>
+struct Wrapper {
+  static constexpr bool IsSame(Wrapper<T>*) { return true; }
+  static constexpr bool IsSame(void *)      { return false; }
+};
+
+// Old code:
+  if (std::is_same<Type1, Type2>::value) ...
+
+// New code:
+  if (Wrapper<Type1>::IsSame<(Wrapper<Type2>*)(nullptr)) ...
+```
+
+???
+Explain that the latter version only ever instantiates two types.
+
+---
+name: std library is_same
+template: basic-layout
+
+### Case study #2: libc++ and its debug symbols
+
+With the wrapper version, we have:
+
+```cpp
+Wrapper<char>
+Wrapper<char>::IsSame(Wrapper<char>*)
+Wrapper<char>::IsSame(void *);
+Wrapper<int>
+Wrapper<int>::IsSame(Wrapper<int>*)
+Wrapper<int>::IsSame(void *);
+Wrapper<float>
+Wrapper<float>::IsSame(Wrapper<float>*)
+Wrapper<float>::IsSame(void *);
+Wrapper<double>
+Wrapper<double>::IsSame(Wrapper<double>*)
+Wrapper<double>::IsSame(void *);
+... and on and on.  literally N classes instantiated, and 2*N functions.
+```
+
+???
+So, not a win for code clarity, and really not much of a win if you're not comparing a lot of types.  We can do better.
+
+A better example would be std::conditional
+
+---
+name: std library is_same
+template: basic-layout
+
+### Case study #2: libc++ and its debug symbols
+
+```cpp
+// Two more tweaks:
+struct WrapperBase {
+  static constexpr bool IsSame(void *)      { return false; }
+};
+ 
+template<typename T>
+struct Wrapper : WrapperBase {
+  using WrapperBase::IsSame;
+  static constexpr bool IsSame(Wrapper<T>*) { return true; }
+};
+
+template<typename Type1, typename Type2> using is_same =
+  std::integral_constant<bool, Wrapper<Type1>::IsSame((Wrapper<Type2>*)(nullptr))>;
+
+// Code is same either way:
+  if (std::is_same<Type1, Type2>::value) ...
+```
+
+???
+So, how does this do?
+
+( My use only: https://godbolt.org/z/oa8TSJ )
+
+---
+name: std library is_same
+template: basic-layout
+
+### Case study #2: libc++ and its debug symbols
+
+With the wrapper version, we have:
+
+```cpp
+WrapperBase::IsSame(void *);
+Wrapper<char>
+Wrapper<char>::IsSame(Wrapper<char>*)
+Wrapper<int>
+Wrapper<int>::IsSame(Wrapper<int>*)
+Wrapper<float>
+Wrapper<float>::IsSame(Wrapper<float>*)
+Wrapper<double>
+Wrapper<double>::IsSame(Wrapper<double>*)
+... and on and on.  literally N classes instantiated, and N functions.
+```
+
+???
+So, now it's more clearly a win.
+
+A better example would be std::conditional
+
+---
+name: std library conditional
+template: basic-layout
+
+## Case study #2: libc++ and its debug symbols
+
+Consider std::conditional:
+
+```cpp
+template<bool B, class T, class F>
+struct conditional { typedef T type; };
+
+template<class T, class F>
+struct conditional<false, T, F> { typedef F type; };
+```
+
+Do you see why this was a huge burden on debug symbols?
+
+???
+Pause to give people time to think...
+
+---
+name: std library conditional
+template: basic-layout
+
+### Case study #2: libc++ and its debug symbols
+
+Consider std::conditional:
+
+```cpp
+std::conditional<true, char, void>
+std::conditional<true, const char (&)[22], void>
+std::conditional<true, double, void>
+std::conditional<true, float, void>
+std::conditional<true, int, void>
+std::conditional<true, std::deque<int>, void>
+std::conditional<true, std::string, void>
+std::conditional<true, std::string_view, void>
+std::conditional<true, std::vector<std::string>&, void>
+std::conditional<true, void (*)(), void>
+... and on and on
+```
+
+???
+Pause to give people time to think...
+
+---
+name: std library conditional
+template: basic-layout
+
+### Case study #2: libc++ and its debug symbols
+
+```cpp
+template<bool B, class T, class F> struct conditional { typedef T type; }; 
+template<class T, class F> struct conditional<false, T, F> { typedef F type; };
+```
+Better would be:
+```cpp
+template<bool B> struct conditional {
+  template <class T, class F> using type = T;
+};
+
+template<> struct conditional<false> {
+  template <class T, class F> using type = F;
+};
+```
+
+This was checked into libc++ a few months ago...
+
+???
+Explain that the latter version only ever instantiates two types.
+
+---
+name: std library conditional
+template: basic-layout
+
+## Case study #2: libc++ and its debug symbols
+
+Consider std::add_const:
+
+```cpp
+template< class T>
+struct add_const {
+  typedef const T type;
+};
+
+template <class T>
+using add_const_t = typename add_const<T>::type;
+```
+
+Since this only takes one type, this wasn't a debug symbol burden...
+
+???
+But what about the obvious improvement?
+
+---
+name: std library conditional
+template: basic-layout
+
+### Case study #2: libc++ and its debug symbols
+
+Consider this improvement to std::add_const:
+
+```cpp
+template <class T>
+struct add_const {
+  using type = T&;
+};
+
+template <class T>
+//using add_const_t = typename add_const<T>::type;
+using add_const_t = const T;
+```
+
+Why is this a bad idea?
+
+???
+Pause to give people time to think...
+
+---
+name: std library conditional
+template: basic-layout
+
+### Case study #2: libc++ and its debug symbols
+
+```cpp
+template <class T>
+struct add_const {
+  using type = T&;
+};
+
+template <class T>
+using add_const_t = const T;
+
+template<typename T>
+T nop(std::add_const<T>);
+
+int main() {
+  int i = 0;
+  return nop(i);
+}
+```
+
+
+???
+Explain that thia code compiles, but it wouldn't if nop had been declared using the real std::add_const_t, because the real one blocks template type deduction.
+
+---
+name: questions
+template: title-layout
+
+# Questions?
+
+Reference1: http://talesofcpp.fusionfenix.com/post-22/true-story-efficient-packing
+
+Reference2: https://ldionne.com/2015/11/29/efficient-parameter-pack-indexing/
+
+libc++ change https://github.com/llvm-mirror/libcxx/commit/80f67f31b4de5df3de185040a388d57e356c230f
+
+???
 
 ---
 name: custom tuple
@@ -985,10 +1303,7 @@ LAST SLIDE
 LAST SLIDE
 
 
-Reference: http://talesofcpp.fusionfenix.com/post-22/true-story-efficient-packing
-
-Reference2: https://ldionne.com/2015/11/29/efficient-parameter-pack-indexing/
-
+???
 Older code: https://godbolt.org/z/5RZkb5
 Newest code: https://godbolt.org/z/vgGT2I
 
@@ -997,12 +1312,4 @@ name: conclusion
 template: title-layout
 
 ## Hopefully this at least serves a basis for understanding C++ templates!
-
----
-name: questions
-template: title-layout
-
-# Questions?
-
-???
 
