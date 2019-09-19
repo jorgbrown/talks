@@ -35,7 +35,7 @@ class: middle, center
 ![First Guess](templates_memory_bender_meme.jpg)
 
 ???
-When I see the compiler running out of RAM, I can just blame templates without even looking.  Not much else can so easily run a compiler into the ground.  But before I do that, let me go voer some background.
+When I see the compiler running out of RAM, I can just blame templates without even looking.  Not much else can so easily run a compiler into the ground.  But before I do that, let me go over some background.
 
 ---
 name: Background
@@ -43,7 +43,7 @@ class: left, middle
 
 # Reducing Template Overhead
 ## First, some background
-1. BubbleSort is better than you think.
+1. BubbleSort is better than you think... as long as N is tiny.
 1. Hard to measure when things are going well
 1. Compile-time calculation can be surprising
 
@@ -55,11 +55,14 @@ Even fairly bad template code does fine in small situations.
 On the flip side, template code can be far worse than BubbleSort.
 
 ---
+name: Background
+class: left, middle
+
 ### It's hard to measure template overhead...
 
 * Typically the overhead of starting up a compiler and reading in the standard
-  headers dwarfs most template instantiations, so measuring total allocations is
-  noisy
+  headers dwarfs most template instantiations, so using the OS to measure total
+  allocations is noisy
    * For clang, use -Xclang -print-stats to get fine detail; it even works in
      Compiler Explorer.
    * Dump all types: compile with "-g", then "dwarfdump -debug-types
@@ -70,6 +73,9 @@ Well-designed O(n) template code is in the noise, as far as overhead goes.
 So is O(n^2) overhead, typically.
 
 ---
+name: Background
+class: left, middle
+
 ### Compile-time basics: functions
 
 ```cpp
@@ -87,6 +93,9 @@ int main() {
 Inefficient at runtime, but compiles quickly.
 
 ---
+name: Background
+class: left, middle
+
 ### Compile-time basics: functions
 
 ```cpp
@@ -102,9 +111,12 @@ int main() {
 ```
 
 ???
-Marking the function constexpr doesn't mean that it gets executed at compile-time; just that ir could.  You have to evaluate it in a constexpr context to force it to be evaluated at compile-time.
+Marking the function constexpr doesn't mean that it gets executed at compile-time; just that it could.  You have to evaluate it in a constexpr context to force it to be evaluated at compile-time.
 
 ---
+name: Background
+class: left, middle
+
 ### Compile-time basics: functions
 
 ```cpp
@@ -123,6 +135,9 @@ int main() {
 OK Great, now it's in a compile-time context.  But let's up that from 16 to 27...
 
 ---
+name: Background
+class: left, middle
+
 ### Compile-time basics: functions
 
 ```cpp
@@ -144,6 +159,9 @@ So what happened?  Well, the compiler evaluated it, but constexpr functions aren
 How do we fix this?  Well, let's do a template instead.
 
 ---
+name: Background
+class: left, middle
+
 ### Compile-time basics: templates
 
 ```cpp
@@ -164,6 +182,9 @@ Note: Specializations for <0> and <1> were necessary, because lazy evaluation fo
 ? : doesn't block template instantiation.
 
 ---
+name: Background
+class: left, middle
+
 ### Compile-time basics: templates
 
 ```cpp
@@ -186,6 +207,9 @@ int main() {
 OK, but that's a bit ugly, and tedious.  It's weird to have the loop termination occur outside of the function. C++17 allows us to make this clearer; anything within a false "if constexpr" block won't be examined by the compiler, other than basic syntactic regularity like balanced parens.
 
 ---
+name: Background
+class: left, middle
+
 ### Compile-time basics: templates
 
 ```cpp
@@ -209,6 +233,9 @@ int main() {
 But is there maybe a way to make a function be evaluated at compile-time?
 
 ---
+name: Background
+class: left, middle
+
 #### This one weird trick...
 
 ```cpp
@@ -238,6 +265,9 @@ Speaking of auto return types, they have an extra benefit, and it has to do with
 function signatures.
 
 ---
+name: Background
+class: left, middle
+
 ## The overhead of function signatures
 
 ```cpp
@@ -257,6 +287,9 @@ auto add3(T a, T b) { return a + b; }
 ```
 
 ---
+name: Background
+class: left, middle
+
 ## The overhead of function signatures
 
 ```cpp
@@ -283,6 +316,9 @@ The first case is clear.
 The second case is not so clear.  It turns out that the function's return type is included in its signature whenever the return type depends on a template parameter.  The reasons for this are a bit arcane; the obvious reason would be that sometimes you might want to have a function generate a string, and you want to template its return type.
 
 ---
+name: Background
+class: left, middle
+
 ## The overhead of function signatures
 
 ```cpp
@@ -296,11 +332,15 @@ typename std::enable_if_t<!std::is_same<T, void>::value, T>
 process(T a);
 
 *What's your guess?
-
 ```
+
+???
 Give them a little while to think about it...
 
 ---
+name: Background
+class: left, middle
+
 ## The overhead of function signatures
 
 ```cpp
@@ -327,6 +367,9 @@ In particular, if you're just trying to prevent a routine from being called, it'
 far more clear to provide a static_assert.  (Next slide)
 
 ---
+name: Background
+class: left, middle
+
 ## The overhead of function signatures
 
 ```cpp
@@ -350,18 +393,22 @@ auto process(T a) {
 name: lessons
 template: basic-layout
 
-### Lessons so far
+### Summary of background
 
-1. 'inline' functions aren't necessarily inlined.
-   * 'inline' is only guaranteed to affect linkage.
-2. 'constexpr' functions are not necessarily suitable for constexpr use, not necessarily inlined,
-   even if they always produce the same result, and usually not memo-ized.
-   * 'constexpr' only guarantees that the result can be used in situations where
-     only a constant is allowed.
-3. 'template' instantiations are guaranteed to be memo-ized
+1. '`inline`' functions aren't necessarily inlined.
+   * '`inline`' is only guaranteed to affect linkage.
+2. '`constexpr`' functions are not necessarily suitable for constexpr use, not
+   necessarily inlined, even if they always produce the same result, and usually not memo-ized.
+   * '`constexpr`' only guarantees that the result can be used in situations where
+     only a constant is allowed, for at least one set of inputs.
+3. '`template`' instantiations are guaranteed to be memo-ized
    * ... but their functions are not necessarily inlined.
-4. 'if constexpr' and 'auto' return types go well with templated functions.
+4. '`if constexpr`' and '`auto`' return types go well with templated functions.
 5. Results may vary by compiler.
+
+???
+constexpr functions, like templated functions are implicitly inline.
+An inline function that isn't used usually won't generate code.
 
 ---
 name: custom tuple
@@ -522,6 +569,7 @@ Calls:
  double& Getter&lt;0ul, double>::get&lt;double>(MyTuple<double>&)
 </pre>
 
+???
 Explain why that is, then ask, well, what can we do to make this better?
 
 ---
@@ -608,6 +656,7 @@ auto& get(MyTuple<Ts...> &tup) {
 }
 ```
 
+???
 Rather than instantiate the rest of the tuple, we'll inherit from it.  That way we can access the other member functions directly.
 
 This doesn't quite compile, though...
@@ -644,6 +693,8 @@ auto& get(MyTuple<Ts...> &tup) {
 So, does this work?
 
 ---
+name: custom tuple
+template: basic-layout
 
 And now...
 ```cpp
@@ -702,7 +753,7 @@ MyTuple<char, short, int> tuple{'c', 1, 2};
 
 ???
 
-Mention the constructor API and the fact that future slides own't have it.
+Mention the constructor API and the fact that future slides won't have it.
 
 But how does get() work?  More importantly, doesn't this have problems if a T is mentioned
 twice?
@@ -787,7 +838,7 @@ MyTuple<std::index_sequence<0, 1, 2>, char, short, int> tuple;
 But what if you don't have C++17?  The technique is applicable elsewhere, so...
 
 ---
-name: hi there
+name: custom tuple
 template: basic-layout
 
 Make MyTuple generate the index sequence!
@@ -816,6 +867,9 @@ public:
 But what if you want a tuple with a first type that is an index sequence?
 
 ---
+name: custom tuple
+template: basic-layout
+
 Make MyTuple a using statement, to separate it from its implementation.
 
 ```cpp
@@ -1338,6 +1392,12 @@ constexpr bool are_any_void() {
 ```
 
 Once again, integral_constant and function overloads make a great team.
+
+---
+name: Disclaimer
+template: title-layout
+
+# Disclaimer: compilers vary and evolve
 
 ---
 name: questions
