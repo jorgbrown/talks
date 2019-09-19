@@ -1204,7 +1204,7 @@ This was checked into libc++ a few months ago...
 Explain that the latter version only ever instantiates two types.
 
 ---
-name: std library conditional
+name: std library add_const
 template: basic-layout
 
 ## Case study #2: libc++ and its debug symbols
@@ -1214,7 +1214,7 @@ Consider std::add_const:
 ```cpp
 template< class T>
 struct add_const {
-  typedef const T type;
+  using type = const T;
 };
 
 template <class T>
@@ -1227,7 +1227,7 @@ Since this only takes one type, this wasn't a debug symbol burden...
 But what about the obvious improvement?
 
 ---
-name: std library conditional
+name: std library add_const
 template: basic-layout
 
 ### Case study #2: libc++ and its debug symbols
@@ -1237,7 +1237,7 @@ Consider this improvement to std::add_const:
 ```cpp
 template <class T>
 struct add_const {
-  using type = T&;
+  using type = const T;
 };
 
 template <class T>
@@ -1251,7 +1251,7 @@ Why is this a bad idea?
 Pause to give people time to think...
 
 ---
-name: std library conditional
+name: std library add_const
 template: basic-layout
 
 ### Case study #2: libc++ and its debug symbols
@@ -1259,7 +1259,7 @@ template: basic-layout
 ```cpp
 template <class T>
 struct add_const {
-  using type = T&;
+  using type = const T;
 };
 
 template <class T>
@@ -1277,6 +1277,67 @@ int main() {
 
 ???
 Explain that thia code compiles, but it wouldn't if nop had been declared using the real std::add_const_t, because the real one blocks template type deduction.
+
+Talk is basically over, time for one more weird trick...
+
+---
+name: one more weird trick
+template: basic-layout
+
+## One more thing^W weird trick
+
+```cpp
+// Using C++17 fold expressions to check if any of these types is void
+template<typename... T>
+constexpr bool are_any_void() {
+    return (std::is_void<T>() || ...);
+}
+```
+
+But how would you do this in C++11?
+
+---
+name: one more weird trick
+template: basic-layout
+
+### One more weird trick : std::integral_constant again!
+
+```cpp
+constexpr bool Or(std::initializer_list<std::integral_constant<bool, false>>) {
+  return false;
+}
+constexpr bool Or(std::initializer_list<bool>) {
+  return true;
+}
+```
+
+The first overload is chosen only if all the types are integral_constant<bool, false>
+
+The second overload gets the rest, since integral_constant<bool, x> implicitly converts to bool.
+
+---
+name: one more weird trick
+template: basic-layout
+
+### One more weird trick : std::integral_constant again!
+
+```cpp
+constexpr bool Or(std::initializer_list<std::integral_constant<bool, false>>) {
+  return false;
+}
+constexpr bool Or(std::initializer_list<bool>) {
+  return true;
+}
+// Using C++11 to check if any of these types is void
+template<typename... T>
+constexpr bool are_any_void() {
+  return Or( {typename std::is_void<T>::type()...} );
+}
+
+}
+```
+
+Once again, integral_constant and function overloads make a great team.
 
 ---
 name: questions
