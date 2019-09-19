@@ -154,8 +154,9 @@ int main() {
 }
 ```
 
-So what happened?  Well, the compiler evaluated it, but constexpr functions aren't necessarily memo-ized.
+Trouble: constexpr functions aren't necessarily memo-ized.
 
+???
 How do we fix this?  Well, let's do a template instead.
 
 ---
@@ -357,7 +358,9 @@ process(T a);
 *            process<std::string>(std::string)
 
 ```
-??? That's right, it's not the return type that gets encoded, it's the way the
+
+???
+That's right, it's not the return type that gets encoded, it's the way the
 return type was determined.
 
 The moral of the story is: prefer to use an auto return type unless the enable_if
@@ -398,7 +401,7 @@ template: basic-layout
 1. '`inline`' functions aren't necessarily inlined.
    * '`inline`' is only guaranteed to affect linkage.
 2. '`constexpr`' functions are not necessarily suitable for constexpr use, not
-   necessarily inlined, even if they always produce the same result, and usually not memo-ized.
+   necessarily inlined, and usually not memo-ized.
    * '`constexpr`' only guarantees that the result can be used in situations where
      only a constant is allowed, for at least one set of inputs.
 3. '`template`' instantiations are guaranteed to be memo-ized
@@ -407,8 +410,18 @@ template: basic-layout
 5. Results may vary by compiler.
 
 ???
+So what's inline?
+Any inline function is inline.
 constexpr functions, like templated functions are implicitly inline.
-An inline function that isn't used usually won't generate code.
+Templated functions are implicitly inline, as are methods in templated classes.
+
+But people are crazy about inline and often specify things as inline even when that's not feasible, so they're not necessarily inlined.
+inline functions aren't necessarily inlined even if they always produce
+the same result!
+
+So what does it mean to be inline?
+The linker is OK with dupes and will throw all but one away.
+An inline function that isn't used won't generate code.
 
 ---
 name: custom tuple
@@ -895,9 +908,11 @@ MyTuple<char, short, int> tuple;
 ```
 
 ???
-But what about C++11?
+But what about C++14?
+
+C++14 has no variadic using declaration...
 ---
-name: custom tuple in C++11
+name: custom tuple in C++14
 template: basic-layout
 
 But before C++17, you can't use variadic using statements.  What about C++14?
@@ -914,7 +929,7 @@ public:
 ```
 
 ---
-name: custom tuple in C++11
+name: custom tuple in C++14
 template: basic-layout
 
 In C++14, we could do it with an extra template parameter...
@@ -1074,7 +1089,7 @@ std::is_same<int, double>   std::is_same<double, double>
 ```
 
 ???
-Pause to give people time to think...
+So, how can we make this O(N) instead of O(N^2)?
 
 ---
 name: std library is_same
@@ -1098,7 +1113,7 @@ struct Wrapper {
 ```
 
 ???
-Explain that the latter version only ever instantiates two types.
+Explain that the latter version only ever instantiates two functions per type.
 
 ---
 name: std library is_same
@@ -1126,8 +1141,6 @@ Wrapper<double>::IsSame(void *);
 
 ???
 So, not a win for code clarity, and really not much of a win if you're not comparing a lot of types.  We can do better.
-
-A better example would be std::conditional
 
 ---
 name: std library is_same
@@ -1229,6 +1242,8 @@ std::conditional<true, void (*)(), void>
 ```
 
 ???
+How can we fix this?
+
 Pause to give people time to think...
 
 ---
@@ -1256,6 +1271,8 @@ This was checked into libc++ a few months ago...
 
 ???
 Explain that the latter version only ever instantiates two types.
+
+OK, next example: add_const.
 
 ---
 name: std library add_const
@@ -1299,10 +1316,19 @@ template <class T>
 using add_const_t = const T;
 ```
 
-Why is this a bad idea?
+How much better will this be?
 
 ???
 Pause to give people time to think...
+
+---
+name: Hyrum STOP
+class: middle, center
+
+![First Guess](HyrumStop.png)
+
+???
+Hyrum's Law states: "With a sufficient number of users of an API, it does not matter what you promise in the contract: all observable behaviors of your system will be depended on by somebody."
 
 ---
 name: std library add_const
@@ -1330,7 +1356,7 @@ int main() {
 
 
 ???
-Explain that thia code compiles, but it wouldn't if nop had been declared using the real std::add_const_t, because the real one blocks template type deduction.
+Explain that this code compiles, but it wouldn't if nop had been declared using the real std::add_const_t, because the real one blocks template type deduction.
 
 Talk is basically over, time for one more weird trick...
 
@@ -1344,7 +1370,7 @@ template: basic-layout
 // Using C++17 fold expressions to check if any of these types is void
 template<typename... T>
 constexpr bool are_any_void() {
-    return (std::is_void<T>() || ...);
+    return (std::is_void<T>::value || ...);
 }
 ```
 
