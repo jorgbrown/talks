@@ -1346,7 +1346,7 @@ template <class T>
 using add_const_t = const T;
 
 template<typename T>
-T nop(std::add_const<T>);
+T nop(add_const_t<T>);
 
 int main() {
   int i = 0;
